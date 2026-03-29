@@ -3,28 +3,34 @@ import { predictDrugAndOutcome } from '../geminiService';
 
 // Mock the GoogleGenAI SDK
 vi.mock('@google/genai', () => {
-  return {
-    GoogleGenAI: vi.fn().mockImplementation(() => ({
+  const generateContentMock = vi.fn().mockResolvedValue({
+    text: JSON.stringify({
+      disease: 'Lung Adenocarcinoma',
+      recommendedDrugs: [
+        {
+          name: 'Osimertinib',
+          mechanism: 'EGFR TKI',
+          confidence: 0.95,
+          potentialOutcome: 'Improved survival',
+          evidenceLevel: 'Tier I',
+          fdaStatus: 'Approved'
+        }
+      ],
+      riskAssessment: 'High risk due to EGFR T790M mutation',
+      suggestedNextSteps: ['Monitor for resistance']
+    })
+  });
+
+  const GoogleGenAIMock = vi.fn(function () {
+    return {
       models: {
-        generateContent: vi.fn().mockResolvedValue({
-          text: JSON.stringify({
-            disease: 'Lung Adenocarcinoma',
-            recommendedDrugs: [
-              {
-                name: 'Osimertinib',
-                mechanism: 'EGFR TKI',
-                confidence: 0.95,
-                potentialOutcome: 'Improved survival',
-                evidenceLevel: 'Tier I',
-                fdaStatus: 'Approved'
-              }
-            ],
-            riskAssessment: 'High risk due to EGFR T790M mutation',
-            suggestedNextSteps: ['Monitor for resistance']
-          })
-        })
+        generateContent: generateContentMock
       }
-    })),
+    };
+  });
+
+  return {
+    GoogleGenAI: GoogleGenAIMock,
     Type: {
       OBJECT: 'OBJECT',
       ARRAY: 'ARRAY',
@@ -35,6 +41,12 @@ vi.mock('@google/genai', () => {
 });
 
 describe('geminiService', () => {
+  beforeEach(async () => {
+    const { GoogleGenAI } = await import('@google/genai');
+    // @ts-ignore
+    GoogleGenAI.mockClear();
+  });
+
   it('predictDrugAndOutcome returns parsed AI response', async () => {
     const result = await predictDrugAndOutcome('Mock data summary');
     
@@ -45,10 +57,11 @@ describe('geminiService', () => {
 
   it('throws error if AI response is invalid JSON', async () => {
     const { GoogleGenAI } = await import('@google/genai');
-    const mockAi = new GoogleGenAI({ apiKey: '' });
     // @ts-ignore
-    mockAi.models.generateContent.mockResolvedValueOnce({ text: 'invalid json' });
+    const firstInstance = GoogleGenAI.mock.results[0]?.value ?? new GoogleGenAI({ apiKey: '' });
+    // @ts-ignore
+    firstInstance.models.generateContent.mockResolvedValueOnce({ text: 'invalid json' });
 
-    await expect(predictDrugAndOutcome('bad data')).rejects.toThrow('Invalid prediction format received from AI.');
+    await expect(predictDrugAndOutcome('bad data')).rejects.toThrow('Invalid cancer analysis format.');
   });
 });
