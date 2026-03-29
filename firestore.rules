@@ -1,0 +1,93 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (matches request.auth.uid)
+    // Fields:
+    //   - uid: string (required, immutable)
+    //   - email: string (required, immutable)
+    //   - displayName: string (optional)
+    //   - photoURL: string (optional)
+    //   - createdAt: string (required, immutable)
+    //   - lastLogin: string (required)
+    //
+    // Collection: analyses
+    // Document ID: {analysisId}
+    // Fields:
+    //   - userId: string (required, immutable, matches request.auth.uid)
+    //   - fileName: string (required)
+    //   - fileType: string (optional)
+    //   - result: string (required)
+    //   - summary: string (optional)
+    //   - timestamp: string (required, immutable)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt', 'lastLogin']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             data.uid is string &&
+             data.email is string;
+    }
+
+    function isValidAnalysis(data) {
+      return data.keys().hasAll(['userId', 'fileName', 'result', 'timestamp']) &&
+             data.userId == request.auth.uid &&
+             data.fileName is string && data.fileName.size() < 255 &&
+             data.result is string && data.result.size() < 1000000 &&
+             data.userId is string;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) &&
+                      request.resource.data.uid == resource.data.uid &&
+                      request.resource.data.createdAt == resource.data.createdAt;
+    }
+
+    match /analyses/{analysisId} {
+      allow read: if isDocOwner();
+      allow create: if isAuthenticated() && isValidAnalysis(request.resource.data) &&
+                      request.resource.data.userId == request.auth.uid;
+      allow update: if isDocOwner() && isValidAnalysis(request.resource.data) &&
+                      request.resource.data.userId == resource.data.userId &&
+                      request.resource.data.timestamp == resource.data.timestamp;
+      allow delete: if isDocOwner();
+    }
+  }
+}
